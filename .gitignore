@@ -65,3 +65,9 @@ core/python-bundle/
 # (those are AGENTS.md / PRD.md / DESIGN.md copies the design agent
 # received as input; the canonical files live elsewhere in docs/).
 docs/design-handoff/project/uploads/
+
+# 本地运维产物（不入库）
+workbench.db.before_*
+v0.6.*_handoff.md
+project_memory.md
+migrations_*_reapply.sql
