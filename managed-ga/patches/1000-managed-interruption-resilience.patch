@@ -1,0 +1,95 @@
+diff --git a/agent_loop.py b/agent_loop.py
+index a744f0d..13abe5c 100644
+--- a/agent_loop.py
++++ b/agent_loop.py
+@@ -77,0 +78 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
++                handler._empty_ct = 0  # 真实工具调用 = 模型恢复正常，清零空响应计数（勿删：漏改会让计数器跨任务累积）
+diff --git a/ga.py b/ga.py
+index 06de6cd..72b0b3d 100644
+--- a/ga.py
++++ b/ga.py
+@@ -493,0 +494,3 @@ class GenericAgentHandler(BaseHandler):
++    def _llm_session(self):
++        return getattr(getattr(self.parent, 'llmclient', None), 'backend', None)
++
+@@ -494,0 +498,2 @@ class GenericAgentHandler(BaseHandler):
++        '''轮次级重试：请求级重试耗尽后，退避等待再重发整轮，而不是直接收工。
++        上限来自模型配置 turn_retry_max（默认 6）；用户中途停止立刻放弃等待。'''
+@@ -496 +501,11 @@ class GenericAgentHandler(BaseHandler):
+-        if self._empty_ct >= 3: return StepOutcome({}, should_exit=True)
++        sess = self._llm_session()
++        max_turn_retries = max(1, int(getattr(sess, 'turn_retry_max', 6) or 6))
++        if self._empty_ct >= max_turn_retries: return StepOutcome({}, should_exit=True)
++        backoff = [10, 30, 60, 120, 300]
++        d = backoff[min(self._empty_ct - 1, len(backoff) - 1)]
++        yield f"[Info] 上游错误，{d}s 后轮次级重试 ({self._empty_ct}/{max_turn_retries})...\n"
++        end = time.time() + d
++        while time.time() < end:
++            if sess is not None and getattr(sess, 'should_stop', None) and sess.should_stop():
++                return StepOutcome({}, should_exit=True)
++            time.sleep(0.5)
+@@ -507 +522 @@ class GenericAgentHandler(BaseHandler):
+-            return self._retry_or_exit("[ERROR] Blank response, regenerate and tooluse")
++            return (yield from self._retry_or_exit("[ERROR] Blank response, regenerate and tooluse"))
+@@ -509 +524 @@ class GenericAgentHandler(BaseHandler):
+-            return self._retry_or_exit("[ERROR] Incomplete response. Regenerate and tooluse.")
++            return (yield from self._retry_or_exit("[ERROR] Incomplete response. Regenerate and tooluse."))
+@@ -511 +526 @@ class GenericAgentHandler(BaseHandler):
+-            return self._retry_or_exit("[ERROR] max_tokens limit reached. Use multi small steps to do it.")
++            return (yield from self._retry_or_exit("[ERROR] max_tokens limit reached. Use multi small steps to do it."))
+diff --git a/llmcore.py b/llmcore.py
+index b26e637..658e33d 100644
+--- a/llmcore.py
++++ b/llmcore.py
+@@ -498,0 +499,13 @@ def _stamp_oai_cache_markers(messages, model):
++_DEFAULT_RETRY_SCHEDULE = [3, 10, 30, 60, 120]
++
++def _normalize_retry_schedule(value):
++    """Request-level backoff tiers (seconds). Anything unusable means "use the default"."""
++    if not isinstance(value, (list, tuple)) or not value: return None
++    tiers = []
++    for item in value:
++        try: sec = float(item)
++        except (TypeError, ValueError): return None
++        if sec <= 0: return None
++        tiers.append(sec)
++    return tiers
++
+@@ -506 +519,4 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
+-        return None if ra and ra > cap else max(0.5, ra or min(30.0, 3.0 * (2 ** attempt)))
++        if ra and ra > cap: return None
++        if ra: return max(0.5, ra)
++        schedule = getattr(sess, 'retry_schedule', None) or _DEFAULT_RETRY_SCHEDULE
++        return max(0.5, float(schedule[min(attempt, len(schedule) - 1)]))
+@@ -880,0 +897,3 @@ class BaseSession:
++        self.retry_schedule = _normalize_retry_schedule(cfg.get('retry_schedule'))
++        try: self.turn_retry_max = max(1, int(cfg.get('turn_retry_max') or 6))
++        except (TypeError, ValueError): self.turn_retry_max = 6
+diff --git a/reflect/goal_mode.py b/reflect/goal_mode.py
+index edec793..2d6664b 100644
+--- a/reflect/goal_mode.py
++++ b/reflect/goal_mode.py
+@@ -34 +34,7 @@ CONTINUATION_PROMPT = """[Goal Mode — 持续优化]
+-你正在 Goal Mode 下工作：无法宣告完成，你会被无法阻止地持续唤醒直到预算耗尽
++你正在 Goal Mode 下工作：完成即停，预算耗尽为保底
++
++完成协议（当且仅当 objective 已完整达成）：
++1. 在 state 文件（{state_file}）写入 "completion_signal": {{"verdict": "完成判定", "evidence": "客观证据列表"}}
++2. 证据必须可验证（测试结果/产物清单/逐条对照原始需求）
++虚假完成声明会被后续检验推翻并浪费预算，宁缺毋滥。
++未写 completion_signal 就继续按下面的流程推进。
+@@ -75 +81,9 @@ def check():
+-    
++
++    # 完成驱动：agent 宣告完成即收口，剩余预算不消耗；不足 2 轮视为过早，忽略信号
++    if state.get('completion_signal'):
++        if int(state.get('turns_used', 0) or 0) >= 2:
++            state['status'] = 'done_completed'
++            state['end_time'] = time.time()
++            _save(state)
++            return '/exit'
++
+@@ -103 +117,2 @@ def check():
+-        turn=turn
++        turn=turn,
++        state_file=STATE_FILE

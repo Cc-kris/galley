@@ -75,6 +75,7 @@ def agent_runner_loop(client, system_prompt, user_input, handler, tools_schema,
             tool_name, args, tid = tc['tool_name'], tc['args'], tc.get('id', '')
             if tool_name == 'no_tool': pass
             else: 
+                handler._empty_ct = 0  # 真实工具调用 = 模型恢复正常，清零空响应计数（勿删：漏改会让计数器跨任务累积）
                 if verbose: yield f"🛠️ Tool: `{tool_name}`  📥 args:\n````text\n{get_pretty_json(args)}\n````\n"
                 else: yield f"🛠️ {tool_name}({_compact_tool_args(tool_name, args)})\n"
             handler.current_turn = turn

@@ -496,6 +496,19 @@ def _stamp_oai_cache_markers(messages, model):
             c = list(c); c[-1] = dict(c[-1], cache_control={'type': 'ephemeral'})
             messages[idx] = {**messages[idx], 'content': c}
 
+_DEFAULT_RETRY_SCHEDULE = [3, 10, 30, 60, 120]
+
+def _normalize_retry_schedule(value):
+    """Request-level backoff tiers (seconds). Anything unusable means "use the default"."""
+    if not isinstance(value, (list, tuple)) or not value: return None
+    tiers = []
+    for item in value:
+        try: sec = float(item)
+        except (TypeError, ValueError): return None
+        if sec <= 0: return None
+        tiers.append(sec)
+    return tiers
+
 def _stream_with_retry(sess, url, headers, payload, parse_fn):
     STATS['session'] = sess.name
     _RETRYABLE = {408, 409, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 527, 529}
@@ -503,7 +516,10 @@ def _stream_with_retry(sess, url, headers, payload, parse_fn):
     def _delay(resp, attempt):
         try: ra = float((resp.headers or {}).get("retry-after"))
         except: ra = None
-        return None if ra and ra > cap else max(0.5, ra or min(30.0, 3.0 * (2 ** attempt)))
+        if ra and ra > cap: return None
+        if ra: return max(0.5, ra)
+        schedule = getattr(sess, 'retry_schedule', None) or _DEFAULT_RETRY_SCHEDULE
+        return max(0.5, float(schedule[min(attempt, len(schedule) - 1)]))
     def _stopped(): return getattr(sess, 'should_stop', None) and sess.should_stop()
     def _sleep(d):  # interruptible sleep; True if aborted
         end = time.time() + d
@@ -878,6 +894,9 @@ class BaseSession:
         self.proxies = {"http": proxy, "https": proxy} if proxy else None
         self.max_retries = max(0, int(cfg.get('max_retries', 4)))
         self.max_retry_after = float(cfg.get('max_retry_after', 60.0))
+        self.retry_schedule = _normalize_retry_schedule(cfg.get('retry_schedule'))
+        try: self.turn_retry_max = max(1, int(cfg.get('turn_retry_max') or 6))
+        except (TypeError, ValueError): self.turn_retry_max = 6
         self.verify = cfg.get('verify', True)
         self.stream = True if self.codex_backend else cfg.get('stream', True)
         default_ct, default_rt = (5, 40) if self.stream else (10, 240)

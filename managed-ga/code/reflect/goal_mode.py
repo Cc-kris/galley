@@ -31,7 +31,13 @@ CONTINUATION_PROMPT = """[Goal Mode — 持续优化]
 
 ⏱ 已用 {elapsed_min:.0f} 分钟，剩余约 {remaining_min:.0f} 分钟。第 {turn} 次唤醒。
 
-你正在 Goal Mode 下工作：无法宣告完成，你会被无法阻止地持续唤醒直到预算耗尽
+你正在 Goal Mode 下工作：完成即停，预算耗尽为保底
+
+完成协议（当且仅当 objective 已完整达成）：
+1. 在 state 文件（{state_file}）写入 "completion_signal": {{"verdict": "完成判定", "evidence": "客观证据列表"}}
+2. 证据必须可验证（测试结果/产物清单/逐条对照原始需求）
+虚假完成声明会被后续检验推翻并浪费预算，宁缺毋滥。
+未写 completion_signal 就继续按下面的流程推进。
 唤醒后流程（3选1）：
 1. 创造阶段(第一次唤醒)：分析objective，在cwd建工作文件夹，严格按照objective执行
 2. 检验阶段：从不同视角检验创造结果，产出检验报告
@@ -72,7 +78,15 @@ BUDGET_LIMIT_PROMPT = """[Goal Mode — 预算耗尽，收口]
 def check():
     state = _load()
     if state is None: return '/exit'
-    
+
+    # 完成驱动：agent 宣告完成即收口，剩余预算不消耗；不足 2 轮视为过早，忽略信号
+    if state.get('completion_signal'):
+        if int(state.get('turns_used', 0) or 0) >= 2:
+            state['status'] = 'done_completed'
+            state['end_time'] = time.time()
+            _save(state)
+            return '/exit'
+
     status = state.get('status', 'running')
     if status != 'running': return '/exit'
     
@@ -100,7 +114,8 @@ def check():
         objective=state['objective'],
         elapsed_min=elapsed / 60,
         remaining_min=remaining / 60,
-        turn=turn
+        turn=turn,
+        state_file=STATE_FILE
     )
 
 def on_done(result):

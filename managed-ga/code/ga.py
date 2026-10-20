@@ -491,9 +491,24 @@ class GenericAgentHandler(BaseHandler):
         #next_prompt += '\n[SYSTEM TIPS] 此函数一般在任务开始或中间时调用，如果任务已成功完成应该是start_long_term_update用于结算长期记忆。\n'
         return StepOutcome({"result": "working key_info updated"}, next_prompt=next_prompt)
 
+    def _llm_session(self):
+        return getattr(getattr(self.parent, 'llmclient', None), 'backend', None)
+
     def _retry_or_exit(self, prompt):
+        '''轮次级重试：请求级重试耗尽后，退避等待再重发整轮，而不是直接收工。
+        上限来自模型配置 turn_retry_max（默认 6）；用户中途停止立刻放弃等待。'''
         self._empty_ct = getattr(self, '_empty_ct', 0) + 1
-        if self._empty_ct >= 3: return StepOutcome({}, should_exit=True)
+        sess = self._llm_session()
+        max_turn_retries = max(1, int(getattr(sess, 'turn_retry_max', 6) or 6))
+        if self._empty_ct >= max_turn_retries: return StepOutcome({}, should_exit=True)
+        backoff = [10, 30, 60, 120, 300]
+        d = backoff[min(self._empty_ct - 1, len(backoff) - 1)]
+        yield f"[Info] 上游错误，{d}s 后轮次级重试 ({self._empty_ct}/{max_turn_retries})...\n"
+        end = time.time() + d
+        while time.time() < end:
+            if sess is not None and getattr(sess, 'should_stop', None) and sess.should_stop():
+                return StepOutcome({}, should_exit=True)
+            time.sleep(0.5)
         return StepOutcome({}, next_prompt=prompt)
 
     def do_no_tool(self, args, response):
@@ -504,11 +519,11 @@ class GenericAgentHandler(BaseHandler):
         thinking = getattr(response, 'thinking', '') or ""
         if not response or (not content.strip() and not thinking.strip()):
             yield "[Warn] LLM returned an empty response. Retrying...\n"
-            return self._retry_or_exit("[ERROR] Blank response, regenerate and tooluse")
+            return (yield from self._retry_or_exit("[ERROR] Blank response, regenerate and tooluse"))
         if '[!!! 流异常中断' in content[-100:] or '!!!Error:' in content[50:][-100:] or (content.endswith('</summary>') and len(content) < 100):
-            return self._retry_or_exit("[ERROR] Incomplete response. Regenerate and tooluse.")
+            return (yield from self._retry_or_exit("[ERROR] Incomplete response. Regenerate and tooluse."))
         if 'max_tokens !!!]' in content[-100:]:
-            return self._retry_or_exit("[ERROR] max_tokens limit reached. Use multi small steps to do it.")
+            return (yield from self._retry_or_exit("[ERROR] max_tokens limit reached. Use multi small steps to do it."))
 
         if self._in_plan_mode() and any(kw in content for kw in ['任务完成', '全部完成', '已完成所有', '🏁']):
             if 'VERDICT' not in content and '[VERIFY]' not in content and '验证subagent' not in content:
