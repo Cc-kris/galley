@@ -55,6 +55,10 @@ CASES.append(('空壳code_run+DSML', '继续执行。\n<code_run script="true"><
 
 # 6. 原有行为：summary 半句 → 重试
 CASES.append(('summary半句(原有)', '<summary>The image: orange% 0.16, dark% 99.79 — suspicious: dark 99.7</summary>', 'RETRY'))
+CASES.append(('上游错误串(纯,33字)', '!!!Error: Upstream request failed', 'RETRY'))
+CASES.append(('上游错误串(429额度)', '!!!Error: HTTP 429: {"code":"API_KEY_QUOTA_EXHAUSTED","message":"API key 额度已用完"}', 'RETRY'))
+CASES.append(('上游错误串(401禁用)', '!!!Error: HTTP 401: {"code":"API_KEY_DISABLED","message":"API key is disabled"}', 'RETRY'))
+CASES.append(('代码块里提到!!!Error', '关于日志，我确认：调用链里出现过 `!!!Error: Upstream request failed`，已修好并重跑了 3 次回归全部通过。', 'END'))
 
 # 7. 原有行为：正常带代码块收尾的最终答复仍应正常结束
 CASES.append(('带```代码块的讲解', '用法示例：\n```python\nprint(1)\nprint(2)\nprint(3)\nprint(4)\nprint(5)\nprint(6)\n```\n以上是全部内容，无需再执行。', 'END'))

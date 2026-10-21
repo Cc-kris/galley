@@ -525,6 +525,20 @@ class GenericAgentHandler(BaseHandler):
         if 'max_tokens !!!]' in content[-100:]:
             return (yield from self._retry_or_exit("[ERROR] max_tokens limit reached. Use multi small steps to do it."))
 
+        # 1.6 上游失败被当成正文：绝不能算作"任务完成"
+        # 历史数据：711 条 assistant 消息正文是 "!!!Error: ..." 错误串，其中 697 条被判 no_tool
+        # 直接结束本轮（旧检测窗口 content[50:][-100:] 对长度 <50 的纯错误串完全失效），
+        # 用户看到的就是"话没说完就断了"。这里改为一律走轮次级重试。
+        _stripped = content.strip()
+        if _stripped.startswith('!!!Error') or _stripped.startswith('[Error]') or _stripped.startswith('[ERROR]'):
+            _err = _stripped.splitlines()[0][:180]
+            yield f"[Warn] 上游返回错误而不是回复：{_err}\n"
+            if ('API_KEY_DISABLED' in _stripped) or ('QUOTA_EXHAUSTED' in _stripped) or ('invalid api key' in _stripped.lower()):
+                yield ("[Error] 账号侧问题（密钥被禁用 / 额度耗尽），重试无法自愈："
+                       "请到 Galley 设置 → 模型，检查该服务商的 API Key 与余额。\n")
+            return (yield from self._retry_or_exit(
+                "[ERROR] 上一轮请求失败：" + _err + " 请重试；必要时把任务拆成更小的步骤。"))
+
         # 1.5 上游保留标记泄漏 / 正文里的"文本形式工具调用"
         # 某些上游（deepseek 系）会把 <｜｜DSML｜｜> 这类原生函数调用保留标记直接吐进正文，
         # 结构化 tool_calls 随之丢失，工具调用退化成正文中的 <code_run ...>...</code_run>。
