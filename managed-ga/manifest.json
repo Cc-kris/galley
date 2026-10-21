@@ -38,7 +38,8 @@
       "0026-managed-discord-restart-continuity.patch",
       "0027-managed-url-version-qualifier.patch",
       "0028-managed-remote-driver-default-tab.patch",
-      "1000-managed-interruption-resilience.patch"
+      "1000-managed-interruption-resilience.patch",
+      "1001-managed-upstream-error-not-final.patch"
     ]
   },
   "stateSchemaVersion": 1
