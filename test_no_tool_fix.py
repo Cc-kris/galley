@@ -1,6 +1,6 @@
 """回归测试：do_no_tool 对「文本形式工具调用 / 上游 DSML 标记泄漏」的处理。"""
-import sys, re
-sys.path.insert(0, '/Users/mac/Documents/Dev/galley/managed-ga/code')
+import os, sys, re
+sys.path.insert(0, os.environ.get('GA_CODE_DIR', '/Users/mac/Documents/Dev/galley/managed-ga/code'))
 import ga
 
 
