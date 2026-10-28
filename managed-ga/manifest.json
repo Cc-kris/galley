@@ -39,7 +39,9 @@
       "0027-managed-url-version-qualifier.patch",
       "0028-managed-remote-driver-default-tab.patch",
       "1000-managed-interruption-resilience.patch",
-      "1001-managed-upstream-error-not-final.patch"
+      "1000a-managed-dsml-marker-not-tool-call.patch",
+      "1001-managed-upstream-error-not-final.patch",
+      "1002-managed-truncated-summary-not-final.patch"
     ]
   },
   "stateSchemaVersion": 1

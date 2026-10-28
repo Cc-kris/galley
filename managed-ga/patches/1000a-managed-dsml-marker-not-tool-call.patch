@@ -1,0 +1,39 @@
+diff --git a/ga.py b/ga.py
+index 72b0b3d2..667912e5 100644
+--- a/ga.py
++++ b/ga.py
+@@ -525,6 +525,34 @@ class GenericAgentHandler(BaseHandler):
+         if 'max_tokens !!!]' in content[-100:]:
+             return (yield from self._retry_or_exit("[ERROR] max_tokens limit reached. Use multi small steps to do it."))
+ 
++        # 1.5 上游保留标记泄漏 / 正文里的"文本形式工具调用"
++        # 某些上游（deepseek 系）会把 <｜｜DSML｜｜> 这类原生函数调用保留标记直接吐进正文，
++        # 结构化 tool_calls 随之丢失，工具调用退化成正文中的 <code_run ...>...</code_run>。
++        # 旧逻辑会把这种回复当成 no_tool（=任务完成）而结束本轮，表现为"说到一半就断了"。
++        # 这里先尝试把文本形式 code_run 还原执行；无法还原则当作未完成重新发起（受 turn_retry_max 约束）。
++        _leak_re = re.compile(r'<[^<>]{0,40}?[｜|]{1,2}DSML[｜|]{1,2}[^<>]*?>')
++        _leak = bool(_leak_re.search(content)) or ('｜DSML｜' in content) or ('|DSML|' in content)
++        _txt = re.search(r'<\s*(code_run|file_write|file_patch|file_read|web_execute_js|web_scan)\b', content)
++        if _leak or _txt:
++            text_call = re.search(r'<\s*code_run\b([^>]*)>([\s\S]*?)</\s*code_run\s*>', content)
++            if text_call and len(text_call.group(2).strip()) >= 10:
++                attrs, body = text_call.group(1), text_call.group(2).strip()
++                m_type = re.search(r'type\s*=\s*["\'](python|py|bash|sh|shell|powershell|javascript|js)["\']', attrs)
++                ctype = (m_type.group(1) if m_type else 'python').lower()
++                ctype = {'py': 'python', 'sh': 'bash', 'shell': 'bash', 'js': 'javascript'}.get(ctype, ctype)
++                yield "[Info] 检测到正文中的文本形式 code_run（上游标记泄漏导致工具调用丢失），直接执行。\n"
++                resp2 = response
++                if _leak_re.search(content):
++                    try:
++                        resp2.content = _leak_re.sub('', content)
++                    except Exception:
++                        resp2 = response
++                return (yield from self.do_code_run({'script': body, 'type': ctype}, resp2))
++            yield "[Warn] 上游标记泄漏/工具调用未结构化，重新发起。\n"
++            return (yield from self._retry_or_exit(
++                "[ERROR] 上一次回复中的工具调用没有以结构化方式发出（正文里出现了工具标签或上游保留标记）。"
++                "请直接用工具调用发送，不要在正文中书写工具标签。"))
++
+         if self._in_plan_mode() and any(kw in content for kw in ['任务完成', '全部完成', '已完成所有', '🏁']):
+             if 'VERDICT' not in content and '[VERIFY]' not in content and '验证subagent' not in content:
+                 yield "[Warn] Plan模式完成声明拦截。\n"
