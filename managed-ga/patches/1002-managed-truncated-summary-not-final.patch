@@ -1,0 +1,22 @@
+diff --git a/ga.py b/ga.py
+index 884d3185..f49c7180 100644
+--- a/ga.py
++++ b/ga.py
+@@ -520,7 +520,16 @@ class GenericAgentHandler(BaseHandler):
+         if not response or (not content.strip() and not thinking.strip()):
+             yield "[Warn] LLM returned an empty response. Retrying...\n"
+             return (yield from self._retry_or_exit("[ERROR] Blank response, regenerate and tooluse"))
+-        if '[!!! 流异常中断' in content[-100:] or '!!!Error:' in content[50:][-100:] or (content.endswith('</summary>') and len(content) < 100):
++        # 1.4 未闭合的 <summary> = 上游把回复截断在半句上。
++        # 旧条件只认 content.endswith('</summary>')，而截断的摘要永远不会有闭合标签，
++        # 于是最该重试的形态恰好是唯一逃过检测的形态：落到下方兜底 next_prompt=None
++        # → agent_loop 判 CURRENT_TASK_DONE → 会话静默收工（用户只看到"自己断了"）。
++        # 会话库实测：以 <summary> 开头的 no_tool 收工点 879 个，其中未闭合 17 个，
++        # 这 17 个无一例外没有任何后续正文，是 100% 可靠的截断信号。
++        _truncated_summary = (content.lstrip().startswith('<summary>')
++                              and '</summary>' not in content)
++        if ('[!!! 流异常中断' in content[-100:] or '!!!Error:' in content[50:][-100:]
++                or _truncated_summary or (content.endswith('</summary>') and len(content) < 100)):
+             return (yield from self._retry_or_exit("[ERROR] Incomplete response. Regenerate and tooluse."))
+         if 'max_tokens !!!]' in content[-100:]:
+             return (yield from self._retry_or_exit("[ERROR] max_tokens limit reached. Use multi small steps to do it."))

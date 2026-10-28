@@ -55,6 +55,26 @@ CASES.append(('空壳code_run+DSML', '继续执行。\n<code_run script="true"><
 
 # 6. 原有行为：summary 半句 → 重试
 CASES.append(('summary半句(原有)', '<summary>The image: orange% 0.16, dark% 99.79 — suspicious: dark 99.7</summary>', 'RETRY'))
+
+# 6.1 未闭合 summary（本次真实 t1125 原文，61 字硬截断）→ 必须重试
+CASES.append(('未闭合summary(t1125真实)',
+              '<summary>剩余单测是选择器仍指向外层组件；改为真正的 contenteditable 节点，并重新定位模型配置入口',
+              'RETRY'))
+CASES.append(('未闭合summary(空壳)', '<summary>', 'RETRY'))
+CASES.append(('未闭合summary(前导换行)',
+              '\n  <summary>BI 已通过；标签入口已定位为旧 input，替换为通用 TagInput，并检查精选开关和模型配置错误提示',
+              'RETRY'))
+CASES.append(('未闭合summary(纯错误串嵌套)',
+              '<summary>!!!Error: Upstream service temporarily unavailable. Please retry your request.', 'RETRY'))
+
+# 6.2 反向：<summary> 已闭合且后面有正文（正常最终答复）→ 结束本轮
+CASES.append(('闭合summary+正文(正常终答)',
+              '<summary>文档已审完，共 3 处不一致</summary>\n\n详细结论如下：\n1. 版本号 0.6.3 与 0.6.4 混用。\n2. 第二处……',
+              'END'))
+# 6.3 反向：正文中途提到 <summary> 一词但不以它开头 → 不应触发重试
+CASES.append(('正文提及summary非开头',
+              '关于渲染：`<summary>` 标签是给折叠块用的，我已在样式里补齐，无需再跑。', 'END'))
+
 CASES.append(('上游错误串(纯,33字)', '!!!Error: Upstream request failed', 'RETRY'))
 CASES.append(('上游错误串(429额度)', '!!!Error: HTTP 429: {"code":"API_KEY_QUOTA_EXHAUSTED","message":"API key 额度已用完"}', 'RETRY'))
 CASES.append(('上游错误串(401禁用)', '!!!Error: HTTP 401: {"code":"API_KEY_DISABLED","message":"API key is disabled"}', 'RETRY'))
