@@ -1,0 +1,7 @@
+diff --git a/agentmain.py b/agentmain.py
+index 5faa33d1..781dc763 100644
+--- a/agentmain.py
++++ b/agentmain.py
+@@ -218 +218 @@ class GenericAgent:
+-                                    max_turns=180, verbose=self.verbose, initial_user_content=initial_user_content, yield_info=True)
++                                    max_turns=500, verbose=self.verbose, initial_user_content=initial_user_content, yield_info=True)

@@ -215,7 +215,7 @@ class GenericAgent:
                 self.llmclient.backend.read_timeout = max(self.llmclient.backend.read_timeout, 1200)
             initial_user_content = image_content_blocks(raw_query, images) if images else None
             gen = agent_runner_loop(self.llmclient, sys_prompt, raw_query, handler, TOOLS_SCHEMA,
-                                    max_turns=180, verbose=self.verbose, initial_user_content=initial_user_content, yield_info=True)
+                                    max_turns=500, verbose=self.verbose, initial_user_content=initial_user_content, yield_info=True)
             try:
                 full_resp = ""; last_pos = 0; curr_turn = 0; turn_resps = self.all_outputs[-1]["outputs"]
                 for chunk in gen:
