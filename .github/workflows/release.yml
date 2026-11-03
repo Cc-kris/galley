@@ -59,19 +59,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: macos-15
-            target: aarch64-apple-darwin
-            arch: aarch64
-            bundle_dir: dmg
-            bundle_glob: "*.dmg"
-          # Mac Intel via cross-compile on macos-15 (arm64 runner).
-          # bundle-python.sh installs x86_64 PBS Python and pip-installs
-          # GA deps using it, so Rosetta 2 is required on this host.
-          - platform: macos-15
-            target: x86_64-apple-darwin
-            arch: x64
-            bundle_dir: dmg
-            bundle_glob: "*.dmg"
+          # NOTE (throwaway branch win-webview2-offline): only the Windows
+          # installer is rebuilt, to re-cut Galley_0.6.4_Windows_x64-setup.exe
+          # with the WebView2 runtime bundled
+          # (bundle.windows.webviewInstallMode = "offlineInstaller").
+          # The macOS matrix entries are intentionally omitted.
           - platform: windows-2022
             target: x86_64-pc-windows-msvc
             arch: x64
