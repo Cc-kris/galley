@@ -45,6 +45,25 @@ on:
   # but skip the `release` job that creates the GitHub Release draft —
   # because there's no tag to associate the release with anyway.
   workflow_dispatch:
+    inputs:
+      # Throwaway path used by branch fix/win-webview2-offline-0.6.4: skip the
+      # ~30 min rebuild and only replace the v0.6.4 Windows installer with the
+      # one produced by an earlier run of this workflow (that run already
+      # proves the offlineInstaller bundle works; re-downloading the 279 MB
+      # artifact through the maintainer's network is not viable).
+      skip_build:
+        description: "Skip build and publish artifact_id to publish_tag"
+        type: choice
+        options: ["false", "true"]
+        default: "false"
+      artifact_id:
+        description: "Artifact id to publish when skip_build=true"
+        required: false
+        default: "13240827051"
+      publish_tag:
+        description: "Release tag to update when skip_build=true"
+        required: false
+        default: "v0.6.4"
 
 permissions:
   contents: read
@@ -55,6 +74,7 @@ concurrency:
 
 jobs:
   build:
+    if: inputs.skip_build != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -406,3 +426,76 @@ jobs:
           generate_release_notes: true
           files: artifacts/**/*
           fail_on_unmatched_files: true
+
+  publish-064:
+    name: Replace the v0.6.4 Windows installer asset
+    # Throwaway job (branch fix/win-webview2-offline-0.6.4 only): re-uses the
+    # Windows installer built by an earlier run of this workflow and swaps it
+    # into the v0.6.4 release so Windows users get an installer that bundles
+    # the WebView2 runtime instead of downloading a bootstrapper at
+    # install time.
+    if: inputs.skip_build == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+
+    steps:
+      - name: Download the Windows artifact
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_ID: ${{ inputs.artifact_id }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > artifact.zip
+          ls -l artifact.zip
+          unzip -o -q artifact.zip -d artifacts
+          find artifacts -type f -printf '%10s  %p\n'
+
+      - name: Verify the WebView2 offline runtime is embedded
+        run: |
+          set -euo pipefail
+          EXE=$(find artifacts -name '*Windows_x64-setup.exe' | head -1)
+          SIG=$(find artifacts -name '*Windows_x64-setup.exe.sig' | head -1)
+          [ -n "$EXE" ] && [ -n "$SIG" ] || { echo "::error::exe or sig missing in artifact"; exit 1; }
+          SIZE=$(stat -c%s "$EXE")
+          echo "installer: $EXE"
+          echo "size: $SIZE bytes"
+          # Ships with downloadBootstrapper: 61,151,836 bytes. The embedded
+          # WebView2 runtime (~215 MB) must push it well past 200 MB.
+          if [ "$SIZE" -lt 200000000 ]; then
+            echo "::error::installer is only $SIZE bytes - the WebView2 runtime is NOT embedded"
+            exit 1
+          fi
+          echo "delta vs downloadBootstrapper build: $((SIZE - 61151836)) bytes"
+          # The offline branch compiles a File directive naming this temp file.
+          if strings -a "$EXE" | grep -qi 'MicrosoftEdgeWebView2RuntimeInstaller'; then
+            echo "OK: 'MicrosoftEdgeWebView2RuntimeInstaller' present (offline branch compiled in)"
+          else
+            echo "::warning::oname string not found; relying on the size check"
+          fi
+          if strings -a "$EXE" | grep -qi 'LinkId=2124703'; then
+            echo "::error::bootstrapper download URL still present in the installer"
+            exit 1
+          fi
+          echo "OK: no WebView2 bootstrapper download markers"
+          echo "$EXE" > /tmp/exe_path
+          echo "$SIG" > /tmp/sig_path
+
+      - name: Replace the release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.publish_tag }}
+        run: |
+          set -euo pipefail
+          EXE=$(cat /tmp/exe_path)
+          SIG=$(cat /tmp/sig_path)
+          echo "----- new updater signature -----"
+          cat "$SIG"; echo
+          echo "----- before -----"
+          gh release view "$TAG" --json assets \
+            -q '.assets[] | select(.name|test("Windows")) | "\(.name)\t\(.size)"'
+          gh release upload "$TAG" "$EXE" "$SIG" --clobber
+          echo "----- after -----"
+          gh release view "$TAG" --json assets \
+            -q '.assets[] | select(.name|test("Windows")) | "\(.name)\t\(.size)"'
