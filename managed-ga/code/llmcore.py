@@ -324,12 +324,31 @@ def _parse_openai_sse(resp_lines, api_mode="chat_completions"):
                     idx = evt.get("output_index", 0)
                     fc_buf[idx] = {"id": item.get("call_id", item.get("id", "")), "name": item.get("name", ""), "args": ""}
                     current_fc_idx = idx
+            elif etype == "response.output_item.done":
+                # Some relays (e.g. gemini behind an OpenAI-compat proxy) expose the
+                # final tool arguments only on the completed item and may never stream
+                # a usable .delta. Heal an empty buffer from this authoritative copy.
+                item = evt.get("item", {})
+                if item.get("type") == "function_call":
+                    idx = evt.get("output_index", current_fc_idx or 0)
+                    args = item.get("arguments") or ""
+                    if idx in fc_buf:
+                        if args and not fc_buf[idx]["args"]: fc_buf[idx]["args"] = args
+                        if not fc_buf[idx]["id"]: fc_buf[idx]["id"] = item.get("call_id", item.get("id", ""))
+                        if not fc_buf[idx]["name"]: fc_buf[idx]["name"] = item.get("name", "")
+                    elif args:
+                        fc_buf[idx] = {"id": item.get("call_id", item.get("id", "")), "name": item.get("name", ""), "args": args}
             elif etype == "response.function_call_arguments.delta":
                 idx = evt.get("output_index", current_fc_idx or 0)
                 if idx in fc_buf: fc_buf[idx]["args"] += evt.get("delta", "")
             elif etype == "response.function_call_arguments.done":
+                # Only accept a NON-EMPTY payload: some relays emit arguments="" here
+                # after already streaming the full value via .delta events. Copying the
+                # empty string verbatim would discard the accumulated arguments and
+                # leave the tool call with empty input {} ("Code missing").
                 idx = evt.get("output_index", current_fc_idx or 0)
-                if idx in fc_buf: fc_buf[idx]["args"] = evt.get("arguments", fc_buf[idx]["args"])
+                args = evt.get("arguments")
+                if idx in fc_buf and args: fc_buf[idx]["args"] = args
             elif etype == "error":
                 err = evt.get("error", {})
                 emsg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
